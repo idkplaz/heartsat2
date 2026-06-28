@@ -1,0 +1,31 @@
+name: CustomHearts
+version: '${project.version}'
+main: com.customhearts.CustomHeartsPlugin
+api-version: '1.21.11'
+description: Custom Hearts system with lives, abilities, and unlocks
+
+commands:
+  heart:
+    description: CustomHearts main command
+    usage: /heart <subcommand>
+    permission: customhearts.use
+  lives:
+    description: Lives management
+    usage: /lives <subcommand>
+    permission: customhearts.use
+  growlock:
+    description: Lock growing heart height
+    usage: /growlock
+    permission: customhearts.use
+  growunlock:
+    description: Unlock growing heart height
+    usage: /growunlock
+    permission: customhearts.use
+
+permissions:
+  customhearts.admin:
+    description: Admin access
+    default: op
+  customhearts.use:
+    description: Player access
+    default: true

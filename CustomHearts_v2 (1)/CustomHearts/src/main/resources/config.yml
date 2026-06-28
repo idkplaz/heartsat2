@@ -1,0 +1,125 @@
+# CustomHearts v2 Configuration
+
+settings:
+  max-heart-slots: 3
+  default-lives: 3
+  max-lives: 5
+  min-lives-withdraw-threshold: 2   # can't withdraw if it would leave you at 1 life
+  heart-display-title: true
+  cooldown-message: true
+
+# ── UNLOCK TRACKING ───────────────────────────────────────────────────────────
+# These are reference values used by the UnlockManager.
+# Unlock methods: MOB_KILLS, ADVANCEMENT, TASK, COMMAND_ONLY, CRAFTING
+# Task types: MINE_BLOCKS, PLAYER_KILLS, SWIM_BLOCKS, PLANT_SEEDS
+
+unlocks:
+  enderman_heart:
+    method: MULTI_MOB_KILLS
+    mobs:
+      ENDERMAN: 100
+      ENDERMITE: 10
+
+  cloud_heart:
+    method: MOB_KILLS
+    mob: BREEZE
+    count: 45
+
+  ocean_heart:
+    method: MULTI
+    mob_kills:
+      ELDER_GUARDIAN: 3
+    tasks:
+      swim_blocks: 10000
+
+  rotten_heart:
+    method: MULTI_MOB_KILLS
+    mobs:
+      ZOMBIE: 250
+      SKELETON: 250
+      SPIDER: 100
+
+  goblin_heart:
+    method: MULTI_MINE
+    blocks:
+      STONE: 7500
+      DEEPSLATE: 5250
+
+  molten_heart:
+    method: MINE_TOTAL
+    total: 2000
+    block_tag: ORES
+
+  blaze_heart:
+    method: MOB_KILLS
+    mob: BLAZE
+    count: 100
+
+  warden_heart:
+    method: MOB_KILLS
+    mob: WARDEN
+    count: 1
+
+  swift_heart:
+    method: MOB_KILLS
+    mob: PHANTOM
+    count: 25
+
+  cursed_heart:
+    method: MOB_KILLS
+    mob: WITCH
+    count: 50
+
+  hell_heart:
+    method: PLAYER_KILLS
+    count: 5
+
+  soul_heart:
+    method: ADVANCEMENT
+    key: "minecraft:nether/return_to_sender"
+
+  runner_heart:
+    method: ADVANCEMENT
+    key: "minecraft:adventure/caves_and_cliffs"
+
+  growing_heart:
+    method: TASK
+    task: plant_all_seeds
+
+  absolute_heart:
+    method: TASK
+    task: reach_one_life
+
+  # Crafting-only hearts (no unlock tracking needed, given via recipe)
+  hardcore_heart:
+    method: CRAFTING
+  allseeing_heart:
+    method: CRAFTING
+  withered_heart:
+    method: CRAFTING
+  totem_heart:
+    method: CRAFTING
+  netherite_heart:
+    method: CRAFTING
+  golden_heart:
+    method: CRAFTING
+  lucky_heart:
+    method: CRAFTING
+  enchanted_heart:
+    method: CRAFTING
+
+  # Command only
+  emerald_heart:
+    method: COMMAND_ONLY
+  heaven_heart:
+    method: COMMAND_ONLY
+
+  dragon_heart:
+    method: MOB_KILLS
+    mob: ENDER_DRAGON
+    count: 1
+
+  frozen_heart:
+    method: MINE_TOTAL
+    total: 1000
+    block: ICE
