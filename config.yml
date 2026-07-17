@@ -1,0 +1,450 @@
+package com.customhearts.listeners;
+
+import com.customhearts.CustomHeartsPlugin;
+import com.customhearts.hearts.HeartType;
+import com.customhearts.managers.PlayerData;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.*;
+import org.bukkit.entity.*;
+import org.bukkit.event.*;
+import org.bukkit.event.entity.*;
+import org.bukkit.event.player.*;
+import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.*;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Vector;
+
+import java.util.Random;
+
+public class HeartAbilityListener implements Listener {
+
+    private final CustomHeartsPlugin plugin;
+    private final Random random = new Random();
+    private final java.util.Map<java.util.UUID, Integer> hellHitCount = new java.util.HashMap<>();
+
+    public HeartAbilityListener(CustomHeartsPlugin plugin) {
+        this.plugin = plugin;
+        startPassiveTicker();
+        startSwimTracker();
+    }
+
+    private void startPassiveTicker() {
+        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                PlayerData data = plugin.getPlayerDataManager().get(p.getUniqueId());
+                applyPassives(p, data);
+            }
+        }, 40L, 40L);
+    }
+
+    private void applyPassives(Player p, PlayerData data) {
+        if (data.hasEquipped(HeartType.BLAZE))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, 60, 0, true, false));
+        if (data.hasEquipped(HeartType.SOUL))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 60, 0, true, false));
+        if (data.hasEquipped(HeartType.OCEAN)) {
+            p.addPotionEffect(new PotionEffect(PotionEffectType.DOLPHINS_GRACE, 60, 1, true, false));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.CONDUIT_POWER, 60, 0, true, false));
+        }
+        if (data.hasEquipped(HeartType.CLOUD))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 60, 0, true, false));
+        if (data.hasEquipped(HeartType.SWIFT))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, 60, 0, true, false));
+        if (data.hasEquipped(HeartType.NETHERITE)) {
+            p.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 60, 2, true, false));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 60, 3, true, false));
+        }
+        if (data.hasEquipped(HeartType.LUCKY))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.LUCK, 60, 2, true, false));
+        if (data.hasEquipped(HeartType.EMERALD))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.HERO_OF_THE_VILLAGE, 60, 4, true, false));
+        if (data.hasEquipped(HeartType.HELL))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 60, 1, true, false));
+        if (data.hasEquipped(HeartType.DRAGON))
+            p.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 60, 0, true, false));
+    }
+
+    private void startSwimTracker() {
+        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (p.isSwimming() || p.getLocation().getBlock().getType() == Material.WATER) {
+                    plugin.getUnlockManager().checkSwim(p, 1);
+                }
+            }
+        }, 20L, 20L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onDamageTaken(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player p)) return;
+        PlayerData data = plugin.getPlayerDataManager().get(p.getUniqueId());
+
+        double healthAfter = p.getHealth() - event.getFinalDamage();
+        double pct = (healthAfter / p.getMaxHealth()) * 100.0;
+        boolean lowHealth = pct <= plugin.getHeartManager().getThreshold(HeartType.TOTEM, "proc-health")
+                && healthAfter > 0;
+
+        // Heaven Heart
+        if (data.hasEquipped(HeartType.HEAVEN) && !data.isOnCooldown("heaven")) {
+            int regenTicks = plugin.getHeartManager().getMiscInt(HeartType.HEAVEN, "regen-duration-ticks", 100);
+            long cdAfterRegen = plugin.getHeartManager().getMiscInt(HeartType.HEAVEN, "cooldown-after-regen-ms", 5000);
+            p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, regenTicks, 0, true, false));
+            new BukkitRunnable() {
+                @Override public void run() { data.setCooldown("heaven", cdAfterRegen); }
+            }.runTaskLater(plugin, regenTicks);
+            data.setCooldown("heaven", (regenTicks * 50L) + cdAfterRegen);
+        }
+
+        // Totem Heart
+        if (data.hasEquipped(HeartType.TOTEM) && lowHealth && !data.isOnCooldown("totem")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.TOTEM, "proc");
+            data.setCooldown("totem", cd > 0 ? cd : 60000);
+            totemProc(p);
+            if (random.nextBoolean()) {
+                data.unequipHeart(HeartType.TOTEM);
+                p.sendMessage(c("&cYour &aTotem Heart &cshattered!"));
+                p.playSound(p.getLocation(), Sound.ITEM_TOTEM_USE, 1f, 0.5f);
+            }
+        }
+
+        // Golden Heart
+        int goldenThreshold = plugin.getHeartManager().getThreshold(HeartType.GOLDEN, "proc-health");
+        boolean goldenLow = (healthAfter / p.getMaxHealth()) * 100.0 <= goldenThreshold && healthAfter > 0;
+        if (data.hasEquipped(HeartType.GOLDEN) && goldenLow && !data.isOnCooldown("golden")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.GOLDEN, "proc");
+            data.setCooldown("golden", cd > 0 ? cd : 60000);
+            goldenAppleEffects(p);
+            if (random.nextBoolean()) {
+                data.unequipHeart(HeartType.GOLDEN);
+                p.sendMessage(c("&cYour &eGolden Heart &cshattered!"));
+                p.playSound(p.getLocation(), Sound.ENTITY_ITEM_BREAK, 1f, 1f);
+            }
+        }
+
+        // Runner Heart
+        int runnerThreshold = plugin.getHeartManager().getThreshold(HeartType.RUNNER, "proc-health");
+        boolean runnerLow = (healthAfter / p.getMaxHealth()) * 100.0 <= runnerThreshold && healthAfter > 0;
+        if (data.hasEquipped(HeartType.RUNNER) && runnerLow && !data.isOnCooldown("runner")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.RUNNER, "proc");
+            data.setCooldown("runner", cd > 0 ? cd : 480000);
+            runnerAbility(p);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onHitEntity(EntityDamageByEntityEvent event) {
+        if (!(event.getDamager() instanceof Player p)) return;
+        if (!(event.getEntity() instanceof LivingEntity target)) return;
+        PlayerData data = plugin.getPlayerDataManager().get(p.getUniqueId());
+
+        if (data.hasEquipped(HeartType.BLAZE)) {
+            int fireTicks = plugin.getHeartManager().getMiscInt(HeartType.BLAZE, "fire-ticks", 300);
+            target.setFireTicks(fireTicks);
+        }
+
+        if (data.hasEquipped(HeartType.FROZEN) && !data.isOnCooldown("frozen")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.FROZEN, "freeze");
+            data.setCooldown("frozen", cd > 0 ? cd : 45000);
+            int freezeTicks = plugin.getHeartManager().getMiscInt(HeartType.FROZEN, "freeze-ticks", 140);
+            target.setFreezeTicks(freezeTicks);
+            p.sendActionBar(c("&3Frozen Heart: &bFreeze applied!"));
+        }
+
+        if (data.hasEquipped(HeartType.WITHERED) && !data.isOnCooldown("withered")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.WITHERED, "wither");
+            data.setCooldown("withered", cd > 0 ? cd : 20000);
+            int witherTicks = plugin.getHeartManager().getMiscInt(HeartType.WITHERED, "wither-duration-ticks", 100);
+            target.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, witherTicks, 0));
+        }
+
+        if (data.hasEquipped(HeartType.CURSED) && target instanceof Player && !data.isOnCooldown("cursed")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.CURSED, "debuff");
+            data.setCooldown("cursed", cd > 0 ? cd : 60000);
+            applyCursedDebuff((Player) target);
+        }
+
+        // Hell Heart — every 3rd hit applies wither to self
+        if (data.hasEquipped(HeartType.HELL)) {
+            int count = hellHitCount.getOrDefault(p.getUniqueId(), 0) + 1;
+            if (count >= 3) {
+                count = 0;
+                int witherTicks = plugin.getHeartManager().getMiscInt(HeartType.HELL, "wither-duration-ticks", 100);
+                p.addPotionEffect(new PotionEffect(PotionEffectType.WITHER, witherTicks, 1));
+                p.sendActionBar(c("&4Hell Heart: &cWither II!"));
+            }
+            hellHitCount.put(p.getUniqueId(), count);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onKill(EntityDeathEvent event) {
+        Player killer = event.getEntity().getKiller();
+        if (killer == null) return;
+        plugin.getUnlockManager().checkMobKill(killer, event.getEntityType().name());
+        if (event.getEntity() instanceof Player) plugin.getUnlockManager().checkPlayerKill(killer);
+    }
+
+    @EventHandler
+    public void onRightClick(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) return;
+        if (!event.getAction().isRightClick()) return;
+        Player p = event.getPlayer();
+        PlayerData data = plugin.getPlayerDataManager().get(p.getUniqueId());
+        ItemStack held = p.getInventory().getItemInMainHand();
+        boolean hasMelee = isMeleeWeapon(held);
+
+        // Hardcore Heart use
+        HeartType handHeart = plugin.getHeartManager().getHeartType(held);
+        if (handHeart == HeartType.HARDCORE) {
+            if (plugin.getLivesManager().giveLife(p)) held.setAmount(held.getAmount() - 1);
+            event.setCancelled(true);
+            return;
+        }
+
+        if (data.hasEquipped(HeartType.ENDERMAN) && hasMelee && !data.isOnCooldown("enderman")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.ENDERMAN, "teleport");
+            data.setCooldown("enderman", cd > 0 ? cd : 3000);
+            endermanTeleport(p);
+            event.setCancelled(true);
+        }
+        if (data.hasEquipped(HeartType.CLOUD) && hasMelee && !data.isOnCooldown("cloud")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.CLOUD, "dash");
+            data.setCooldown("cloud", cd > 0 ? cd : 5000);
+            cloudDash(p);
+            event.setCancelled(true);
+        }
+        if (data.hasEquipped(HeartType.SWIFT) && hasMelee && !data.isOnCooldown("swift")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.SWIFT, "dash");
+            data.setCooldown("swift", cd > 0 ? cd : 5000);
+            swiftDash(p);
+            event.setCancelled(true);
+        }
+        if (data.hasEquipped(HeartType.WARDEN) && !data.isOnCooldown("warden")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.WARDEN, "beam");
+            data.setCooldown("warden", cd > 0 ? cd : 60000);
+            wardenBeam(p);
+            event.setCancelled(true);
+        }
+        if (data.hasEquipped(HeartType.DRAGON) && !data.isOnCooldown("dragon")) {
+            long cd = plugin.getHeartManager().getCooldownMs(HeartType.DRAGON, "breath");
+            data.setCooldown("dragon", cd > 0 ? cd : 10000);
+            dragonBreath(p);
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    public void onXpGain(PlayerExpChangeEvent event) {
+        PlayerData data = plugin.getPlayerDataManager().get(event.getPlayer().getUniqueId());
+        if (data.hasEquipped(HeartType.ENCHANTED)) event.setAmount(event.getAmount() * 2);
+    }
+
+    // ── ABILITY IMPLEMENTATIONS ───────────────────────────────────────────────
+
+    private void endermanTeleport(Player p) {
+        var dir = p.getLocation().getDirection().normalize();
+        double range = plugin.getHeartManager().getMiscDouble(HeartType.ENDERMAN, "teleport-range", 15);
+        Location dest = null;
+        for (double d = 1; d <= range; d += 0.5) {
+            Location check = p.getLocation().clone().add(dir.clone().multiply(d));
+            if (check.getBlock().getType().isSolid()) break;
+            if (!check.getBlock().getType().isSolid() && !check.clone().add(0,1,0).getBlock().getType().isSolid())
+                dest = check;
+        }
+        if (dest == null) { p.sendActionBar(c("&5Enderman Heart: &cNo valid destination!")); return; }
+        dest.setYaw(p.getLocation().getYaw()); dest.setPitch(p.getLocation().getPitch());
+        p.teleport(dest);
+        p.getWorld().spawnParticle(Particle.PORTAL, dest, 20, 0.3, 0.5, 0.3, 0.1);
+        p.getWorld().playSound(dest, Sound.ENTITY_ENDERMAN_TELEPORT, 1f, 1f);
+    }
+
+    private void cloudDash(Player p) {
+        p.setVelocity(new Vector(0, 1.8, 0));
+        p.getWorld().playSound(p.getLocation(), Sound.ENTITY_WIND_CHARGE_WIND_BURST, 1f, 1f);
+        p.getWorld().spawnParticle(Particle.CLOUD, p.getLocation(), 20, 0.3, 0.3, 0.3, 0.05);
+    }
+
+    private void swiftDash(Player p) {
+        p.setVelocity(p.getLocation().getDirection().normalize().multiply(2.5));
+        p.getWorld().playSound(p.getLocation(), Sound.ITEM_TRIDENT_RIPTIDE_3, 1f, 1.2f);
+        p.getWorld().spawnParticle(Particle.SWEEP_ATTACK, p.getLocation(), 10, 0.5, 0.3, 0.5, 0.1);
+    }
+
+    private void wardenBeam(Player p) {
+        double range = plugin.getHeartManager().getMiscDouble(HeartType.WARDEN, "beam-range", 20);
+        LivingEntity target = findNearest(p, range);
+        if (target == null) { p.sendActionBar(c("&5Warden Heart: &cNo target!")); return; }
+        p.getWorld().playSound(p.getLocation(), Sound.ENTITY_WARDEN_SONIC_BOOM, 1f, 1f);
+        p.getWorld().spawnParticle(Particle.SONIC_BOOM, target.getLocation().add(0, 1, 0), 1);
+
+        // True damage: 3 hearts = 6 HP, bypasses armor and ALL potion effects.
+        // We temporarily set health directly instead of using damage() so resistance/armor don't apply.
+        double trueDamage = 6.0; // 3 hearts
+        double newHealth = Math.max(0.0, target.getHealth() - trueDamage);
+        target.setHealth(newHealth);
+        // Still trigger death if health hits 0
+        if (newHealth <= 0 && target instanceof Player tp) {
+            tp.setHealth(0);
+        }
+
+        target.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, 60, 3));
+        drawBeam(p.getEyeLocation(), target.getLocation().add(0, 1, 0));
+    }
+
+    private void dragonBreath(Player p) {
+        // Shoot dragon breath projectile forward, land where it hits or at max range (30 blocks)
+        org.bukkit.util.Vector dir = p.getLocation().getDirection().normalize();
+        Location spawnLoc = p.getEyeLocation().clone();
+        Location landLoc = spawnLoc.clone();
+
+        // Ray cast up to 30 blocks to find landing spot
+        for (double d = 1; d <= 30; d += 0.5) {
+            Location check = spawnLoc.clone().add(dir.clone().multiply(d));
+            if (check.getBlock().getType().isSolid()) break;
+            landLoc = check;
+        }
+
+        final Location finalLoc = landLoc.clone();
+        final World world = p.getWorld();
+
+        // Play shoot sound at player
+        world.playSound(p.getLocation(), Sound.ENTITY_ENDER_DRAGON_SHOOT, 1f, 1f);
+
+        // Draw projectile trail particles
+        final Location trailLoc = p.getEyeLocation().clone();
+        final org.bukkit.util.Vector step = dir.clone().multiply(0.5);
+        final double totalDist = spawnLoc.distance(finalLoc);
+        final int trailSteps = (int)(totalDist / 0.5);
+
+        new BukkitRunnable() {
+            int i = 0;
+            @Override public void run() {
+                if (i >= trailSteps) { cancel(); launchCloud(finalLoc, world, p); return; }
+                trailLoc.add(step);
+                world.spawnParticle(Particle.DRAGON_BREATH, trailLoc, 5, 0.1, 0.1, 0.1, 0.02);
+                i++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+    }
+
+    private void launchCloud(Location loc, World world, Player source) {
+        // Phase 1: grow from radius 0.5 to 12.5 (25x25 diameter) over 10 seconds (200 ticks)
+        // Phase 2: stay at 12.5 for 3 seconds (60 ticks)
+        // Phase 3: removed
+
+        final float maxRadius = 12.5f; // 25x25 = 12.5 radius
+        final int growTicks = 200;     // 10 seconds to reach max
+        final int holdTicks = 60;      // 3 seconds at max
+        final int totalTicks = growTicks + holdTicks;
+
+        AreaEffectCloud cloud = (AreaEffectCloud) world.spawnEntity(loc, EntityType.AREA_EFFECT_CLOUD);
+        cloud.setRadius(0.5f);
+        cloud.setDuration(totalTicks + 5);
+        cloud.setRadiusOnUse(0);       // don't shrink on use
+        cloud.setRadiusPerTick(0);     // we control radius manually
+        cloud.setReapplicationDelay(20);
+        cloud.setColor(Color.fromRGB(101, 0, 164));
+        cloud.addCustomEffect(new PotionEffect(PotionEffectType.INSTANT_DAMAGE, 1, 1), true);
+        cloud.addCustomEffect(new PotionEffect(PotionEffectType.SLOWNESS, 80, 1), true);
+        cloud.setSource(source);
+
+        world.playSound(loc, Sound.ENTITY_ENDER_DRAGON_GROWL, 1f, 0.8f);
+
+        new BukkitRunnable() {
+            int tick = 0;
+            @Override public void run() {
+                if (!cloud.isValid()) { cancel(); return; }
+                tick++;
+
+                if (tick <= growTicks) {
+                    // Grow phase: linear expansion
+                    float newRadius = 0.5f + (maxRadius - 0.5f) * ((float) tick / growTicks);
+                    cloud.setRadius(newRadius);
+                    // Spawn extra particles at edge to show spreading
+                    world.spawnParticle(Particle.DRAGON_BREATH, loc, (int)(newRadius * 3), newRadius, 0.3, newRadius, 0.01);
+                } else if (tick <= totalTicks) {
+                    // Hold phase: stay at max
+                    cloud.setRadius(maxRadius);
+                    world.spawnParticle(Particle.DRAGON_BREATH, loc, 40, maxRadius, 0.3, maxRadius, 0.01);
+                } else {
+                    // Remove
+                    cloud.remove();
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
+    }
+
+    private void totemProc(Player p) {
+        p.getWorld().spawnParticle(Particle.TOTEM_OF_UNDYING, p.getLocation(), 30, 0.5, 1, 0.5, 0.1);
+        p.getWorld().playSound(p.getLocation(), Sound.ITEM_TOTEM_USE, 1f, 1f);
+        p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 900, 1, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, 100, 1, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, 800, 0, true, false));
+        if (p.getHealth() <= 2.0) p.setHealth(1.0);
+    }
+
+    private void goldenAppleEffects(Player p) {
+        p.addPotionEffect(new PotionEffect(PotionEffectType.REGENERATION, 400, 1, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.ABSORPTION, 2400, 3, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.RESISTANCE, 6000, 0, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.FIRE_RESISTANCE, 6000, 0, true, false));
+        p.getWorld().playSound(p.getLocation(), Sound.ENTITY_PLAYER_BURP, 1f, 1f);
+    }
+
+    private void runnerAbility(Player p) {
+        int invisTicks = plugin.getHeartManager().getMiscInt(HeartType.RUNNER, "invisibility-ticks", 100);
+        int speedTicks = plugin.getHeartManager().getMiscInt(HeartType.RUNNER, "speed-ticks", 200);
+        p.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, invisTicks, 0, true, false));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.SPEED, speedTicks, 2, true, false));
+        for (Player other : Bukkit.getOnlinePlayers()) {
+            if (other != p) other.hidePlayer(plugin, p);
+        }
+        new BukkitRunnable() {
+            @Override public void run() {
+                for (Player other : Bukkit.getOnlinePlayers()) {
+                    if (other != p) other.showPlayer(plugin, p);
+                }
+            }
+        }.runTaskLater(plugin, invisTicks);
+        p.sendActionBar(c("&fRunner Heart: &7True Invisibility!"));
+    }
+
+    private void applyCursedDebuff(Player target) {
+        int weakness = plugin.getHeartManager().getMiscInt(HeartType.CURSED, "weakness-duration-ticks", 400);
+        int slowness = plugin.getHeartManager().getMiscInt(HeartType.CURSED, "slowness-duration-ticks", 400);
+        int poison = plugin.getHeartManager().getMiscInt(HeartType.CURSED, "poison-duration-ticks", 300);
+        switch (random.nextInt(3)) {
+            case 0 -> target.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, weakness, 0));
+            case 1 -> target.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, slowness, 0));
+            case 2 -> target.addPotionEffect(new PotionEffect(PotionEffectType.POISON, poison, 0));
+        }
+    }
+
+    private boolean isMeleeWeapon(ItemStack item) {
+        if (item == null) return false;
+        String n = item.getType().name();
+        return n.endsWith("_SWORD") || n.endsWith("_AXE") || n.endsWith("_PICKAXE");
+    }
+
+    private LivingEntity findNearest(Player p, double range) {
+        LivingEntity closest = null; double dist = Double.MAX_VALUE;
+        for (Entity e : p.getWorld().getNearbyEntities(p.getLocation(), range, range, range)) {
+            if (e == p || !(e instanceof LivingEntity le)) continue;
+            double d = e.getLocation().distanceSquared(p.getLocation());
+            if (d < dist) { dist = d; closest = le; }
+        }
+        return closest;
+    }
+
+    private void drawBeam(Location from, Location to) {
+        double steps = from.distance(to) / 0.5;
+        double dx = (to.getX()-from.getX())/steps, dy = (to.getY()-from.getY())/steps, dz = (to.getZ()-from.getZ())/steps;
+        for (int i = 0; i < (int)steps; i++)
+            from.getWorld().spawnParticle(Particle.SCULK_SOUL, from.clone().add(dx*i,dy*i,dz*i), 1, 0,0,0,0);
+    }
+
+    private Component c(String s) { return LegacyComponentSerializer.legacyAmpersand().deserialize(s); }
+}
